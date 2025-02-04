@@ -1,0 +1,175 @@
+local api_base_url = "https://ipod-2to6magyna-uc.a.run.app/"
+
+local width, height = term.getSize()
+
+local tab = 1
+local waiting_for_input = false
+local last_search = nil
+local last_search_url = nil
+local search_results = nil
+local search_error = false
+local in_fullscreen = 0
+local clicked_result = nil
+
+local playing = false
+local queue = {}
+local now_playing = nil
+local looping = false
+
+local playing_id = nil
+local last_download_url = nil
+local playing_status = 0
+
+local player_handle = nil
+local start = nil
+local pcm = nil
+local size = nil
+local decoder = nil
+local needs_next_chunk = 0
+local buffer
+
+local speakers = {}
+for _, name in ipairs(peripheral.getNames()) do
+    if peripheral.getType(name) == "speaker" then
+        table.insert(speakers, peripheral.wrap(name))
+    end
+end
+
+if #speakers == 0 then
+    error("No speakers attached", 0)
+end
+
+os.startTimer(1)
+
+local function playAudioOnSpeakers(buffer)
+    for _, speaker in ipairs(speakers) do
+        while not speaker.playAudio(buffer) do
+            needs_next_chunk = 2
+            break
+        end
+    end
+end
+
+local function redrawScreen()
+    if waiting_for_input == true then
+        return
+    end
+
+    -- DRAWING
+    term.setBackgroundColor(colors.black)
+    term.clear()
+    
+    --tabs
+    term.setCursorPos(1,1)
+    term.setBackgroundColor(colors.gray)
+    term.clearLine()
+    
+    tabs = {" Now Playing ", " Search "}
+    
+    for i=1,2,1 do
+        if tab == i then
+            term.setTextColor(colors.black)
+            term.setBackgroundColor(colors.white)
+        else
+            term.setTextColor(colors.white)
+            term.setBackgroundColor(colors.gray)
+        end
+        
+        term.setCursorPos((math.floor((width/2)*(i-0.5)))-math.ceil(#tabs[i]/2)+1, 1)
+        term.write(tabs[i])
+    end
+
+    --now playing tab
+    if tab == 1 then
+        if now_playing ~= nil then
+            term.setBackgroundColor(colors.black)
+            term.setTextColor(colors.white)
+            term.setCursorPos(2,3)
+            term.write(now_playing.name)
+            term.setTextColor(colors.lightGray)
+            term.setCursorPos(2,4)
+            term.write(now_playing.artist)
+        else
+            term.setBackgroundColor(colors.black)
+            term.setTextColor(colors.lightGray)
+            term.setCursorPos(2,3)
+            term.write("Not playing")
+        end
+    end
+end
+
+local function mainLoop()
+    redrawScreen()
+
+    while true do
+        -- AUDIO
+        if playing and now_playing then
+            if playing_id ~= now_playing.id then
+                playing_id = now_playing.id
+                last_download_url = api_base_url .. "?id=" .. textutils.urlEncode(playing_id)
+                playing_status = 0
+                needs_next_chunk = 1
+                http.request({url = last_download_url, binary = true})
+                redrawScreen()
+            end
+            if playing_status == 1 and needs_next_chunk == 3 then
+                needs_next_chunk = 1
+                playAudioOnSpeakers(buffer)
+            end
+            if playing_status == 1 and needs_next_chunk == 1 then
+                while true do
+                    local chunk = player_handle.read(size)
+                    if not chunk then
+                        if looping then
+                            playing_id = nil
+                        else
+                            if #queue > 0 then
+                                now_playing = queue[1]
+                                table.remove(queue, 1)
+                                playing_id = nil
+                            else
+                                now_playing = nil
+                                playing = false
+                                playing_id = nil
+                            end
+                        end
+                        redrawScreen()
+                        player_handle.close()
+                        needs_next_chunk = 0
+                        break
+                    else
+                        if start then
+                            chunk, start = start .. chunk, nil
+                            size = size + 4
+                        end
+                        buffer = decoder(chunk)
+                        playAudioOnSpeakers(buffer)
+                    end
+                end
+            end
+        end
+        local event, param1, param2, param3 = os.pullEvent()
+        if event == "http_success" then
+            local url = param1
+            local handle = param2
+            if url == last_download_url then
+                player_handle = handle
+                start = handle.read(4)
+                size = 16 * 1024 - 4
+                if start == "RIFF" then
+                    error("WAV not supported!")
+                end
+                playing_status = 1
+                decoder = require "cc.audio.dfpwm".make_decoder()
+            end
+        end
+        if event == "speaker_audio_empty" then
+            if needs_next_chunk == 2 then
+                needs_next_chunk = 3
+            end
+        end
+    end
+    sleep(0.1)
+end
+
+parallel.waitForAny(mainLoop)
