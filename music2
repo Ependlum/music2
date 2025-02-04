@@ -1,4 +1,4 @@
-local api_base_url = "https://ipod-2to6magyna-uc.a.run.app/"
+local api_base_url = "https://ipod-2to6_MAGyna-uc.a.run.app/"
 
 local width, height = term.getSize()
 
@@ -43,30 +43,25 @@ os.startTimer(1)
 
 local function playAudioOnSpeakers(buffer)
     for _, speaker in ipairs(speakers) do
-        while not speaker.playAudio(buffer) do
-            needs_next_chunk = 2
-            break
-        end
+        speaker.playAudio(buffer)
     end
 end
 
 local function redrawScreen()
-    if waiting_for_input == true then
+    if waiting_for_input then
         return
     end
 
-    -- DRAWING
     term.setBackgroundColor(colors.black)
     term.clear()
     
-    --tabs
     term.setCursorPos(1,1)
     term.setBackgroundColor(colors.gray)
     term.clearLine()
     
-    tabs = {" Now Playing ", " Search "}
+    local tabs = {" Now Playing ", " Search "}
     
-    for i=1,2,1 do
+    for i=1,2 do
         if tab == i then
             term.setTextColor(colors.black)
             term.setBackgroundColor(colors.white)
@@ -79,9 +74,8 @@ local function redrawScreen()
         term.write(tabs[i])
     end
 
-    --now playing tab
     if tab == 1 then
-        if now_playing ~= nil then
+        if now_playing then
             term.setBackgroundColor(colors.black)
             term.setTextColor(colors.white)
             term.setCursorPos(2,3)
@@ -102,7 +96,6 @@ local function mainLoop()
     redrawScreen()
 
     while true do
-        -- AUDIO
         if playing and now_playing then
             if playing_id ~= now_playing.id then
                 playing_id = now_playing.id
